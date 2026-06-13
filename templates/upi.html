@@ -1,0 +1,536 @@
+{% extends "base.html" %}
+{% block title %}UPI Fraud Graph Analyzer{% endblock %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
+<style>
+    #cy {
+        width: 100%;
+        height: 640px;
+        background: #0d1424;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+    }
+    .tx-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 100px 120px 36px;
+        gap: 0.5rem;
+        align-items: center;
+        padding: 0.5rem;
+        border-radius: 6px;
+        margin-bottom: 0.35rem;
+        background: var(--surface2);
+    }
+    .tx-row input {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.4rem 0.6rem;
+        color: var(--text);
+        font-size: 0.8rem;
+        font-family: var(--mono);
+        width: 100%;
+    }
+    .tx-row input:focus { outline: none; border-color: var(--accent); }
+    .remove-btn {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        border-radius: 6px;
+        cursor: pointer;
+        width: 36px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+        transition: all 0.2s;
+    }
+    .remove-btn:hover { border-color: var(--danger); color: var(--danger); }
+    .suspect-card {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+    }
+    .risk-bar {
+        height: 4px;
+        border-radius: 2px;
+        background: var(--border);
+        margin-top: 0.5rem;
+    }
+    .risk-fill { height: 100%; border-radius: 2px; transition: width 0.5s; }
+    .legend-dot {
+        width: 12px; height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .tab-btn {
+        padding: 0.5rem 1.25rem;
+        border: none;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        font-size: 0.875rem;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+    .tab-btn.active { color: var(--accent); border-color: var(--accent); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="main">
+    <div style="margin-bottom:1.5rem;">
+        <h1 style="font-size:1.75rem; font-weight:800; letter-spacing:-0.02em;">📊 UPI Fraud Graph Analyzer</h1>
+        <p style="color:var(--muted); font-size:0.9rem; margin-top:0.25rem;">Map transaction flows, detect mules, identify masterminds</p>
+    </div>
+
+    <div style="display:grid; grid-template-columns:420px 1fr; gap:1.5rem; align-items:start;">
+
+        <!-- Left: Input panel -->
+        <div>
+            <div class="card" style="margin-bottom:1rem;">
+                <div class="card-title">Transaction Data</div>
+                <div style="font-size:0.75rem; color:var(--muted); margin-bottom:1rem;">
+                    Enter UPI IDs / phone numbers and transaction amounts
+                </div>
+
+                <!-- Column headers -->
+                <div style="display:grid; grid-template-columns:1fr 1fr 100px 120px 36px; gap:0.5rem; padding:0 0.5rem; margin-bottom:0.35rem;">
+                    <span style="font-size:0.7rem; color:var(--muted); font-weight:600;">FROM</span>
+                    <span style="font-size:0.7rem; color:var(--muted); font-weight:600;">TO</span>
+                    <span style="font-size:0.7rem; color:var(--muted); font-weight:600;">AMOUNT (₹)</span>
+                    <span style="font-size:0.7rem; color:var(--muted); font-weight:600;">DATE</span>
+                    <span></span>
+                </div>
+
+                <div id="tx-list"></div>
+
+                <button class="btn btn-ghost" onclick="addRow()" style="width:100%; margin-top:0.5rem; justify-content:center;">+ Add Transaction</button>
+            </div>
+
+            <div style="display:flex; gap:0.75rem; margin-bottom:1rem;">
+                <button class="btn btn-primary" onclick="runAnalysis()" style="flex:1; justify-content:center;">
+                    🔍 Analyze Network
+                </button>
+                <button class="btn btn-ghost" onclick="loadSample()" style="flex:1; justify-content:center;">
+                    📂 Load Sample
+                </button>
+            </div>
+
+            <!-- Legend -->
+            <div class="card">
+                <div class="card-title">Node Legend</div>
+                <div style="display:flex; flex-direction:column; gap:0.5rem; font-size:0.8rem;">
+                    <div style="display:flex; align-items:center; gap:0.5rem;"><span class="legend-dot" style="background:#4CAF50"></span> Victim (source of money)</div>
+                    <div style="display:flex; align-items:center; gap:0.5rem;"><span class="legend-dot" style="background:#FF9800"></span> Mule (pass-through account)</div>
+                    <div style="display:flex; align-items:center; gap:0.5rem;"><span class="legend-dot" style="background:#F44336"></span> Mastermind (final recipient)</div>
+                    <div style="display:flex; align-items:center; gap:0.5rem;"><span class="legend-dot" style="background:#9C27B0"></span> Sink (unexplained endpoint)</div>
+                    <div style="display:flex; align-items:center; gap:0.5rem;"><span class="legend-dot" style="background:#2196F3"></span> Unknown</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Graph + Results -->
+        <div>
+            <!-- Summary Stats -->
+            <div id="summary-area" style="display:none; margin-bottom:1rem;">
+                <div class="grid grid-4" style="margin-bottom:1rem;">
+                    <div class="card" style="text-align:center;">
+                        <div class="card-title">Transactions</div>
+                        <div class="stat-big" id="s-tx">0</div>
+                    </div>
+                    <div class="card" style="text-align:center;">
+                        <div class="card-title">Total Amount</div>
+                        <div class="stat-big" style="font-size:1.25rem;" id="s-amt">₹0</div>
+                    </div>
+                    <div class="card" style="text-align:center;">
+                        <div class="card-title">Suspicious</div>
+                        <div class="stat-big" style="color:var(--danger);" id="s-sus">0</div>
+                    </div>
+                    <div class="card" style="text-align:center;">
+                        <div class="card-title">Mules Found</div>
+                        <div class="stat-big" style="color:var(--warn);" id="s-mules">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Graph -->
+            <div class="card" style="margin-bottom:1rem; padding:1rem;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
+                    <div class="card-title" style="margin:0;">Transaction Network</div>
+                    <div style="display:flex; gap:0.5rem;">
+                        <select id="layout-select" onchange="relayout(this.value)" style="background:var(--surface2); border:1px solid var(--border); color:var(--text); border-radius:6px; padding:0.25rem 0.5rem; font-size:0.75rem; cursor:pointer;">
+                            <option value="dagre">Hierarchy (Best)</option>
+                            <option value="breadthfirst">Tree</option>
+                            <option value="concentric">Concentric</option>
+                            <option value="circle">Circle</option>
+                            <option value="grid">Grid</option>
+                        </select>
+                        <button class="btn btn-ghost" onclick="cy && cy.fit(undefined, 60)" style="padding:0.3rem 0.75rem; font-size:0.75rem;">⊡ Fit</button>
+                        <button class="btn btn-ghost" onclick="cy && cy.reset()" style="padding:0.3rem 0.75rem; font-size:0.75rem;">⟳ Reset</button>
+                    </div>
+                </div>
+                <div id="cy"></div>
+                <div style="font-size:0.75rem; color:var(--muted); margin-top:0.5rem; text-align:center;">Click a node to see details • Scroll to zoom • Drag to pan</div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="card">
+                <div style="display:flex; border-bottom:1px solid var(--border); margin:-1.5rem -1.5rem 1.5rem;">
+                    <button class="tab-btn active" onclick="switchTab('suspects', this)">🚨 Suspects</button>
+                    <button class="tab-btn" onclick="switchTab('all-nodes', this)">🔗 All Accounts</button>
+                    <button class="tab-btn" onclick="switchTab('node-detail', this)">📋 Selected Node</button>
+                </div>
+
+                <div id="tab-suspects">
+                    <div id="suspects-list"><div style="color:var(--muted); font-size:0.875rem; text-align:center; padding:2rem;">Run analysis to see results</div></div>
+                </div>
+                <div id="tab-all-nodes" style="display:none;">
+                    <div id="all-nodes-list"></div>
+                </div>
+                <div id="tab-node-detail" style="display:none;">
+                    <div id="node-detail-content" style="color:var(--muted); font-size:0.875rem; text-align:center; padding:2rem;">Click a node in the graph</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Node info popup -->
+<div id="node-popup" style="display:none; position:fixed; bottom:2rem; right:2rem; width:300px; z-index:200;">
+    <div class="card" style="border-color:var(--accent);">
+        <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:0.75rem;">
+            <div class="card-title" style="margin:0;">Selected Account</div>
+            <button onclick="document.getElementById('node-popup').style.display='none'" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:1.2rem;">×</button>
+        </div>
+        <div id="popup-content"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let cy = null;
+let analysisData = null;
+
+function addRow(data = {}) {
+    const list = document.getElementById('tx-list');
+    const div = document.createElement('div');
+    div.className = 'tx-row';
+    div.innerHTML = `
+        <input type="text" placeholder="9876543210@paytm" value="${data.from || ''}">
+        <input type="text" placeholder="mule@ybl" value="${data.to || ''}">
+        <input type="number" placeholder="10000" value="${data.amount || ''}">
+        <input type="date" value="${data.date || ''}">
+        <button class="remove-btn" onclick="this.closest('.tx-row').remove()">×</button>
+    `;
+    list.appendChild(div);
+}
+
+function getTransactions() {
+    const rows = document.querySelectorAll('.tx-row');
+    const txs = [];
+    rows.forEach(row => {
+        const inputs = row.querySelectorAll('input');
+        const frm = inputs[0].value.trim();
+        const to = inputs[1].value.trim();
+        const amount = parseFloat(inputs[2].value) || 0;
+        const date = inputs[3].value;
+        if (frm && to && amount > 0) {
+            txs.push({ from: frm, to: to, amount, date });
+        }
+    });
+    return txs;
+}
+
+async function loadSample() {
+    const res = await fetch('/api/sample-upi');
+    const data = await res.json();
+    document.getElementById('tx-list').innerHTML = '';
+    data.forEach(tx => addRow(tx));
+}
+
+async function runAnalysis() {
+    const txs = getTransactions();
+    if (txs.length === 0) {
+        alert('Add at least one transaction first');
+        return;
+    }
+
+    const res = await fetch('/api/analyze-upi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactions: txs })
+    });
+
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+
+    analysisData = data;
+    renderGraph(data);
+    renderSummary(data.summary);
+    renderSuspects(data.suspicious);
+    renderAllNodes(data.nodes);
+    document.getElementById('summary-area').style.display = 'block';
+}
+
+function renderSummary(s) {
+    document.getElementById('s-tx').textContent = s.total_transactions;
+    document.getElementById('s-amt').textContent = '₹' + s.total_amount.toLocaleString('en-IN');
+    document.getElementById('s-sus').textContent = s.suspicious_accounts;
+    document.getElementById('s-mules').textContent = s.mules;
+}
+
+const CYTO_STYLE = [
+    {
+        selector: 'node',
+        style: {
+            'background-color': 'data(color)',
+            'label': 'data(label)',
+            'color': '#ffffff',
+            'text-valign': 'bottom',
+            'text-halign': 'center',
+            'font-size': '11px',
+            'font-family': 'JetBrains Mono, monospace',
+            'font-weight': '600',
+            'text-margin-y': '8px',
+            'text-wrap': 'wrap',
+            'text-max-width': '140px',
+            'width': 'data(size)',
+            'height': 'data(size)',
+            'border-width': '0px',
+            'background-opacity': 1,
+            'text-background-color': '#080c18',
+            'text-background-opacity': 0.9,
+            'text-background-padding': '4px',
+            'text-background-shape': 'roundrectangle',
+            'z-index': 10,
+        }
+    },
+    {
+        selector: 'edge',
+        style: {
+            'width': 2,
+            'line-color': '#1e40af',
+            'target-arrow-color': '#3b82f6',
+            'target-arrow-shape': 'triangle',
+            'arrow-scale': 1.4,
+            'curve-style': 'taxi',
+            'taxi-direction': 'downward',
+            'taxi-turn': 40,
+            'label': 'data(label)',
+            'color': '#94a3b8',
+            'font-size': '10px',
+            'font-family': 'JetBrains Mono, monospace',
+            'font-weight': '600',
+            'text-background-color': '#080c18',
+            'text-background-opacity': 0.85,
+            'text-background-padding': '3px',
+            'text-background-shape': 'roundrectangle',
+            'z-index': 5,
+        }
+    },
+    {
+        selector: 'node:selected',
+        style: {
+            'border-width': '3px',
+            'border-color': '#ffffff',
+            'z-index': 20,
+        }
+    },
+    {
+        selector: 'edge:selected',
+        style: { 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b', 'width': 3 }
+    }
+];
+
+function buildElements(data) {
+    const elements = [];
+    data.nodes.forEach(n => {
+        const parts = n.id.includes('@') ? n.id.split('@') : [n.id, ''];
+        const label = parts[1] ? parts[0] + '\n@' + parts[1] : parts[0];
+        elements.push({ data: { id: n.id, label, color: n.color, size: n.size, role: n.role, nodeData: n } });
+    });
+    data.edges.forEach((e, i) => {
+        elements.push({ data: { id: 'e' + i, source: e.from, target: e.to, label: e.label, amount: e.amount } });
+    });
+    return elements;
+}
+
+function getLayout(name) {
+    const layouts = {
+        dagre: {
+            name: 'dagre',
+            rankDir: 'TB',          // top-to-bottom: victims at top, mastermind at bottom
+            align: 'UL',
+            ranker: 'tight-tree',
+            nodeSep: 80,            // horizontal gap between nodes in same rank
+            rankSep: 120,           // vertical gap between ranks
+            edgeSep: 30,
+            animate: true,
+            animationDuration: 600,
+            fit: true,
+            padding: 60,
+        },
+        breadthfirst: {
+            name: 'breadthfirst',
+            directed: true,
+            animate: true,
+            padding: 60,
+            spacingFactor: 2.2,
+            avoidOverlap: true,
+        },
+        circle: { name: 'circle', animate: true, padding: 80, spacingFactor: 1.8 },
+        grid:   { name: 'grid',   animate: true, padding: 60, spacingFactor: 2.2, avoidOverlap: true },
+        concentric: {
+            name: 'concentric',
+            animate: true,
+            padding: 60,
+            spacingFactor: 2,
+            concentric: n => { const r = n.data('nodeData'); return r ? (r.role === 'mastermind' ? 4 : r.role === 'mule' ? 3 : r.role === 'sink' ? 2 : 1) : 1; },
+            levelWidth: () => 1,
+            minNodeSpacing: 60,
+        },
+    };
+    return layouts[name] || layouts.dagre;
+}
+
+function renderGraph(data) {
+    if (cy) cy.destroy();
+    cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements: buildElements(data),
+        style: CYTO_STYLE,
+        layout: getLayout('dagre'),
+        minZoom: 0.3,
+        maxZoom: 3,
+    });
+
+    cy.on('tap', 'node', function(evt) {
+        const nodeData = evt.target.data('nodeData');
+        showNodeDetail(nodeData);
+        showNodePopup(nodeData);
+        switchTab('node-detail', document.querySelector('.tab-btn:nth-child(3)'));
+    });
+
+    cy.on('layoutstop', () => cy.fit(undefined, 60));
+}
+
+function showNodePopup(n) {
+    const roleColors = { victim: '#4CAF50', mule: '#FF9800', mastermind: '#F44336', sink: '#9C27B0', unknown: '#2196F3' };
+    document.getElementById('popup-content').innerHTML = `
+        <div style="font-family:var(--mono); font-size:0.8rem; word-break:break-all; margin-bottom:0.5rem; color:var(--text);">${n.id}</div>
+        <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem; flex-wrap:wrap;">
+            <span class="tag" style="background:${roleColors[n.role]}22; color:${roleColors[n.role]};">${n.role.toUpperCase()}</span>
+            <span class="tag tag-${n.risk_score >= 60 ? 'danger' : n.risk_score >= 30 ? 'warn' : 'info'}">Risk: ${n.risk_score}/100</span>
+        </div>
+        <div style="font-size:0.8rem; color:var(--muted);">
+            <div>Received: <span style="color:var(--success);">₹${n.received.toLocaleString('en-IN')}</span></div>
+            <div>Sent: <span style="color:var(--danger);">₹${n.sent.toLocaleString('en-IN')}</span></div>
+            <div>In connections: ${n.in_connections} • Out: ${n.out_connections}</div>
+        </div>
+        ${n.risk_reasons.length ? `<div style="margin-top:0.5rem; font-size:0.75rem; color:var(--warn);">${n.risk_reasons.join('<br>')}</div>` : ''}
+    `;
+    document.getElementById('node-popup').style.display = 'block';
+}
+
+function showNodeDetail(n) {
+    const roleColors = { victim: '#4CAF50', mule: '#FF9800', mastermind: '#F44336', sink: '#9C27B0', unknown: '#2196F3' };
+    document.getElementById('node-detail-content').innerHTML = `
+        <div style="margin-bottom:1rem;">
+            <div class="mono" style="font-size:0.9rem; margin-bottom:0.5rem;">${n.id}</div>
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <span class="tag" style="background:${roleColors[n.role]}22; color:${roleColors[n.role]};">${n.role.toUpperCase()}</span>
+                <span class="tag tag-${n.risk_score >= 60 ? 'danger' : n.risk_score >= 30 ? 'warn' : 'success'}">Risk Score: ${n.risk_score}/100</span>
+            </div>
+        </div>
+        <div class="risk-bar"><div class="risk-fill" style="width:${n.risk_score}%; background:${n.risk_score >= 60 ? '#ef4444' : n.risk_score >= 30 ? '#f59e0b' : '#10b981'};"></div></div>
+        <div class="grid grid-2" style="margin-top:1rem; gap:0.75rem;">
+            <div style="background:var(--surface2); padding:0.75rem; border-radius:8px;">
+                <div style="font-size:0.7rem; color:var(--muted); margin-bottom:0.25rem;">TOTAL RECEIVED</div>
+                <div style="color:var(--success); font-family:var(--mono); font-weight:600;">₹${n.received.toLocaleString('en-IN')}</div>
+            </div>
+            <div style="background:var(--surface2); padding:0.75rem; border-radius:8px;">
+                <div style="font-size:0.7rem; color:var(--muted); margin-bottom:0.25rem;">TOTAL SENT</div>
+                <div style="color:var(--danger); font-family:var(--mono); font-weight:600;">₹${n.sent.toLocaleString('en-IN')}</div>
+            </div>
+        </div>
+        ${n.risk_reasons.length ? `
+        <div style="margin-top:1rem;">
+            <div style="font-size:0.75rem; color:var(--muted); font-weight:600; margin-bottom:0.5rem;">RISK FACTORS</div>
+            ${n.risk_reasons.map(r => `<div style="font-size:0.8rem; color:var(--warn); padding:0.25rem 0;">⚠ ${r}</div>`).join('')}
+        </div>` : ''}
+    `;
+}
+
+function renderSuspects(suspects) {
+    const el = document.getElementById('suspects-list');
+    if (!suspects.length) {
+        el.innerHTML = '<div style="color:var(--success); text-align:center; padding:1rem;">✓ No high-risk accounts detected</div>';
+        return;
+    }
+    el.innerHTML = suspects.map(s => `
+        <div class="suspect-card">
+            <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:0.5rem;">
+                <div class="mono" style="font-size:0.8rem; word-break:break-all; flex:1;">${s.id}</div>
+                <span class="tag tag-${s.risk_score >= 60 ? 'danger' : 'warn'}" style="margin-left:0.5rem; white-space:nowrap;">${s.risk_score}/100</span>
+            </div>
+            <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                <span class="tag tag-${s.role === 'mastermind' ? 'danger' : s.role === 'mule' ? 'warn' : 'info'}">${s.role.toUpperCase()}</span>
+            </div>
+            <div class="risk-bar"><div class="risk-fill" style="width:${s.risk_score}%; background:${s.risk_score >= 60 ? '#ef4444' : '#f59e0b'};"></div></div>
+            <div style="margin-top:0.5rem; font-size:0.75rem; color:var(--muted);">
+                Received: ₹${s.total_received.toLocaleString('en-IN')} &nbsp;|&nbsp; Sent: ₹${s.total_sent.toLocaleString('en-IN')}
+            </div>
+            ${s.reasons.map(r => `<div style="font-size:0.75rem; color:var(--warn); margin-top:0.25rem;">⚠ ${r}</div>`).join('')}
+        </div>
+    `).join('');
+}
+
+function renderAllNodes(nodes) {
+    document.getElementById('all-nodes-list').innerHTML = nodes.map(n => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:0.6rem 0.75rem; background:var(--surface2); border-radius:6px; margin-bottom:0.35rem; cursor:pointer;" onclick="highlightNode('${n.id}')">
+            <div style="display:flex; align-items:center; gap:0.75rem; flex:1; min-width:0;">
+                <span class="legend-dot" style="background:${n.color}; flex-shrink:0;"></span>
+                <span class="mono" style="font-size:0.8rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${n.id}</span>
+            </div>
+            <div style="display:flex; gap:0.5rem; align-items:center; flex-shrink:0;">
+                <span style="font-size:0.75rem; color:var(--muted);">₹${n.received.toLocaleString('en-IN')}</span>
+                <span class="tag tag-${n.risk_score >= 60 ? 'danger' : n.risk_score >= 30 ? 'warn' : 'success'}" style="font-size:0.65rem;">${n.risk_score}</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+function highlightNode(id) {
+    if (!cy) return;
+    cy.$('#' + CSS.escape(id)).select();
+    cy.center(cy.$('#' + CSS.escape(id)));
+    const node = analysisData.nodes.find(n => n.id === id);
+    if (node) { showNodeDetail(node); showNodePopup(node); }
+}
+
+function switchTab(tab, btn) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-suspects').style.display = 'none';
+    document.getElementById('tab-all-nodes').style.display = 'none';
+    document.getElementById('tab-node-detail').style.display = 'none';
+    document.getElementById('tab-' + tab).style.display = 'block';
+}
+
+function relayout(name) {
+    if (!cy) return;
+    cy.layout(getLayout(name)).run();
+}
+
+// Init with 3 empty rows
+addRow(); addRow(); addRow();
+</script>
+{% endblock %}

@@ -1,0 +1,448 @@
+{% extends "base.html" %}
+{% block title %}WhatsApp Forward Chain Tracker{% endblock %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+    .upload-zone {
+        border: 2px dashed var(--border);
+        border-radius: 12px;
+        padding: 3rem 2rem;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        background: var(--surface2);
+    }
+    .upload-zone:hover, .upload-zone.drag-over {
+        border-color: var(--accent);
+        background: rgba(59,130,246,0.05);
+    }
+    .upload-zone input { display: none; }
+
+    .sender-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.75rem;
+        background: var(--surface2);
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+    .sender-row:hover { background: #1e2d45; }
+
+    .ioc-chip {
+        display: inline-block;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 3px 8px;
+        font-size: 0.75rem;
+        font-family: var(--mono);
+        margin: 2px;
+        word-break: break-all;
+    }
+
+    .scam-msg {
+        background: rgba(239,68,68,0.07);
+        border: 1px solid rgba(239,68,68,0.2);
+        border-radius: 8px;
+        padding: 0.75rem;
+        margin-bottom: 0.5rem;
+        font-size: 0.8rem;
+    }
+
+    .tab-btn {
+        padding: 0.5rem 1rem;
+        border: none;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        font-size: 0.8rem;
+        font-weight: 500;
+        transition: all 0.2s;
+        white-space: nowrap;
+    }
+    .tab-btn.active { color: var(--accent); border-color: var(--accent); }
+
+    .kw-badge {
+        display: inline-block;
+        background: rgba(239,68,68,0.15);
+        color: #f87171;
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 0.7rem;
+        margin: 1px;
+        font-weight: 600;
+    }
+
+    canvas { max-height: 220px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="main">
+    <div style="margin-bottom:1.5rem;">
+        <h1 style="font-size:1.75rem; font-weight:800; letter-spacing:-0.02em;">💬 WhatsApp Forward Chain Tracker</h1>
+        <p style="color:var(--muted); font-size:0.9rem; margin-top:0.25rem;">Upload a WhatsApp chat export to trace scam message origins and spread patterns</p>
+    </div>
+
+    <!-- Upload + Instructions -->
+    <div class="grid grid-2" style="margin-bottom:1.5rem; align-items:start;">
+        <div>
+            <div class="card">
+                <div class="card-title">Upload Chat Export</div>
+                <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()"
+                     ondragover="event.preventDefault(); this.classList.add('drag-over')"
+                     ondragleave="this.classList.remove('drag-over')"
+                     ondrop="handleDrop(event)">
+                    <input type="file" id="file-input" accept=".txt" onchange="handleFile(this.files[0])">
+                    <div style="font-size:2.5rem; margin-bottom:0.75rem;">📁</div>
+                    <div style="font-weight:600; margin-bottom:0.25rem;">Drop WhatsApp .txt file here</div>
+                    <div style="font-size:0.8rem; color:var(--muted);">or click to browse</div>
+                </div>
+
+                <div id="file-status" style="display:none; margin-top:0.75rem;" class="alert alert-success"></div>
+                <div id="file-error" style="display:none; margin-top:0.75rem;" class="alert alert-danger"></div>
+
+                <button class="btn btn-primary" onclick="runAnalysis()" id="analyze-btn" disabled style="width:100%; justify-content:center; margin-top:0.75rem;">
+                    🔍 Analyze Chat
+                </button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">How to Export WhatsApp Chat</div>
+            <div style="font-size:0.85rem; color:var(--muted); line-height:1.8;">
+                <div style="margin-bottom:0.5rem;"><span style="color:var(--text); font-weight:600;">On Android:</span></div>
+                <div>1. Open the suspect's chat</div>
+                <div>2. Tap ⋮ → More → Export chat</div>
+                <div>3. Choose <strong style="color:var(--text);">Without media</strong></div>
+                <div>4. Save the .txt file and upload here</div>
+                <hr class="divider" style="margin:1rem 0;">
+                <div style="margin-bottom:0.5rem;"><span style="color:var(--text); font-weight:600;">On iPhone:</span></div>
+                <div>1. Open chat → tap name → Export Chat</div>
+                <div>2. Choose <strong style="color:var(--text);">Without Media</strong></div>
+                <div>4. Share to Files → upload here</div>
+                <hr class="divider" style="margin:1rem 0;">
+                <div style="color:var(--accent); font-size:0.8rem;">🔒 Files are processed locally on the server and not stored.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results area -->
+    <div id="results-area" style="display:none;">
+
+        <!-- Summary stats -->
+        <div class="grid" style="grid-template-columns: repeat(4, 1fr); gap:1rem; margin-bottom:1.5rem;">
+            <div class="card" style="text-align:center;">
+                <div class="card-title">Total Messages</div>
+                <div class="stat-big" id="r-total">0</div>
+            </div>
+            <div class="card" style="text-align:center;">
+                <div class="card-title">Forwarded</div>
+                <div class="stat-big" style="color:var(--warn);" id="r-fwd">0</div>
+            </div>
+            <div class="card" style="text-align:center;">
+                <div class="card-title">Scam Flagged</div>
+                <div class="stat-big" style="color:var(--danger);" id="r-scam">0</div>
+            </div>
+            <div class="card" style="text-align:center;">
+                <div class="card-title">IOCs Found</div>
+                <div class="stat-big" style="color:var(--accent);" id="r-ioc">0</div>
+            </div>
+        </div>
+
+        <!-- Charts row -->
+        <div class="grid grid-2" style="margin-bottom:1.5rem;">
+            <div class="card">
+                <div class="card-title">Message Activity Timeline</div>
+                <canvas id="timeline-chart"></canvas>
+            </div>
+            <div class="card">
+                <div class="card-title">Top Senders by Volume</div>
+                <canvas id="sender-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Main tabs -->
+        <div class="card">
+            <div style="display:flex; border-bottom:1px solid var(--border); margin:-1.5rem -1.5rem 1.5rem; overflow-x:auto;">
+                <button class="tab-btn active" onclick="switchTab('flagged', this)">🚨 Flagged Senders</button>
+                <button class="tab-btn" onclick="switchTab('all-senders', this)">👥 All Senders</button>
+                <button class="tab-btn" onclick="switchTab('iocs', this)">🔗 IOCs</button>
+                <button class="tab-btn" onclick="switchTab('scam-msgs', this)">⚠ Scam Messages</button>
+            </div>
+
+            <!-- Flagged senders -->
+            <div id="tab-flagged">
+                <div id="flagged-list"></div>
+            </div>
+
+            <!-- All senders -->
+            <div id="tab-all-senders" style="display:none;">
+                <div id="all-senders-list"></div>
+            </div>
+
+            <!-- IOCs -->
+            <div id="tab-iocs" style="display:none;">
+                <div id="ioc-content"></div>
+            </div>
+
+            <!-- Scam messages -->
+            <div id="tab-scam-msgs" style="display:none;">
+                <div id="scam-msgs-list"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let fileContent = null;
+let timelineChartInst = null;
+let senderChartInst = null;
+
+function handleDrop(e) {
+    e.preventDefault();
+    document.getElementById('upload-zone').classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+}
+
+function handleFile(file) {
+    if (!file || !file.name.endsWith('.txt')) {
+        showError('Please upload a WhatsApp .txt export file');
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = e => {
+        fileContent = e.target.result;
+        document.getElementById('file-status').style.display = 'block';
+        document.getElementById('file-status').textContent = `✓ Loaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+        document.getElementById('file-error').style.display = 'none';
+        document.getElementById('analyze-btn').disabled = false;
+    };
+    reader.readAsText(file, 'utf-8');
+}
+
+function showError(msg) {
+    document.getElementById('file-error').style.display = 'block';
+    document.getElementById('file-error').textContent = msg;
+}
+
+async function runAnalysis() {
+    if (!fileContent) return;
+
+    document.getElementById('analyze-btn').textContent = '⏳ Analyzing...';
+    document.getElementById('analyze-btn').disabled = true;
+
+    const blob = new Blob([fileContent], { type: 'text/plain' });
+    const form = new FormData();
+    form.append('file', blob, 'chat.txt');
+
+    const res = await fetch('/api/analyze-whatsapp', { method: 'POST', body: form });
+    const data = await res.json();
+
+    document.getElementById('analyze-btn').textContent = '🔍 Analyze Chat';
+    document.getElementById('analyze-btn').disabled = false;
+
+    if (data.error) { showError(data.error); return; }
+
+    renderResults(data);
+}
+
+function renderResults(data) {
+    document.getElementById('results-area').style.display = 'block';
+
+    const s = data.summary;
+    document.getElementById('r-total').textContent = s.total_messages;
+    document.getElementById('r-fwd').textContent = s.total_forwarded;
+    document.getElementById('r-scam').textContent = s.total_scam_flagged;
+    document.getElementById('r-ioc').textContent = s.unique_urls + s.unique_phones + s.unique_upi;
+
+    renderTimeline(data.timeline);
+    renderSenderChart(data.senders);
+    renderFlagged(data.flagged);
+    renderAllSenders(data.senders);
+    renderIOCs(data.iocs);
+    renderScamMsgs(data.flagged);
+}
+
+function renderTimeline(timeline) {
+    if (timelineChartInst) timelineChartInst.destroy();
+    const ctx = document.getElementById('timeline-chart').getContext('2d');
+    timelineChartInst = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: timeline.map(t => t.date),
+            datasets: [
+                {
+                    label: 'Total Messages',
+                    data: timeline.map(t => t.messages),
+                    backgroundColor: 'rgba(59,130,246,0.4)',
+                    borderColor: '#3b82f6',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Forwarded',
+                    data: timeline.map(t => t.forwarded),
+                    backgroundColor: 'rgba(245,158,11,0.4)',
+                    borderColor: '#f59e0b',
+                    borderWidth: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+            scales: {
+                x: { ticks: { color: '#64748b', font: { size: 9 } }, grid: { color: '#1e2d45' } },
+                y: { ticks: { color: '#64748b' }, grid: { color: '#1e2d45' } }
+            }
+        }
+    });
+}
+
+function renderSenderChart(senders) {
+    if (senderChartInst) senderChartInst.destroy();
+    const top = senders.slice(0, 8);
+    const ctx = document.getElementById('sender-chart').getContext('2d');
+    senderChartInst = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: top.map(s => s.name.length > 14 ? s.name.substring(0, 12) + '..' : s.name),
+            datasets: [{
+                label: 'Messages',
+                data: top.map(s => s.total_messages),
+                backgroundColor: top.map(s => s.risk_score >= 50 ? 'rgba(239,68,68,0.5)' : s.risk_score >= 25 ? 'rgba(245,158,11,0.5)' : 'rgba(59,130,246,0.4)'),
+                borderColor: top.map(s => s.risk_score >= 50 ? '#ef4444' : s.risk_score >= 25 ? '#f59e0b' : '#3b82f6'),
+                borderWidth: 1
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { ticks: { color: '#64748b' }, grid: { color: '#1e2d45' } },
+                y: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: '#1e2d45' } }
+            }
+        }
+    });
+}
+
+function renderFlagged(flagged) {
+    const el = document.getElementById('flagged-list');
+    if (!flagged.length) {
+        el.innerHTML = '<div style="color:var(--success); text-align:center; padding:2rem;">✓ No high-risk senders detected</div>';
+        return;
+    }
+    el.innerHTML = flagged.map(s => `
+        <div style="background:var(--surface2); border:1px solid ${s.risk_score >= 60 ? 'rgba(239,68,68,0.3)' : 'rgba(245,158,11,0.3)'}; border-radius:10px; padding:1rem; margin-bottom:0.75rem;">
+            <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:0.75rem;">
+                <div>
+                    <div style="font-weight:600; margin-bottom:0.25rem;">${s.name}</div>
+                    <div style="font-size:0.75rem; color:var(--muted);">
+                        ${s.total_messages} messages &nbsp;|&nbsp;
+                        ${s.forwarded} forwarded (${Math.round(s.forward_ratio * 100)}%) &nbsp;|&nbsp;
+                        ${s.forwarded_many} "forwarded many times"
+                    </div>
+                </div>
+                <span class="tag tag-${s.risk_score >= 60 ? 'danger' : 'warn'}" style="white-space:nowrap; font-size:0.8rem;">${s.risk_score}/100</span>
+            </div>
+            <div style="height:4px; background:var(--border); border-radius:2px; margin-bottom:0.75rem;">
+                <div style="height:100%; border-radius:2px; width:${s.risk_score}%; background:${s.risk_score >= 60 ? '#ef4444' : '#f59e0b'};"></div>
+            </div>
+            ${s.risk_reasons.map(r => `<div style="font-size:0.8rem; color:var(--warn); margin-bottom:0.25rem;">⚠ ${r}</div>`).join('')}
+            ${s.urls_shared.length ? `
+            <div style="margin-top:0.75rem;">
+                <div style="font-size:0.7rem; color:var(--muted); margin-bottom:0.4rem;">SHARED URLS</div>
+                ${s.urls_shared.slice(0, 5).map(u => `<span class="ioc-chip">${u}</span>`).join('')}
+            </div>` : ''}
+        </div>
+    `).join('');
+}
+
+function renderAllSenders(senders) {
+    document.getElementById('all-senders-list').innerHTML = senders.map(s => `
+        <div class="sender-row">
+            <div style="width:36px; height:36px; border-radius:50%; background:${s.risk_score >= 60 ? '#ef4444' : s.risk_score >= 25 ? '#f59e0b' : '#3b82f6'}22; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:700; color:${s.risk_score >= 60 ? '#ef4444' : s.risk_score >= 25 ? '#f59e0b' : '#3b82f6'}; flex-shrink:0;">
+                ${s.name.substring(0, 2).toUpperCase()}
+            </div>
+            <div style="flex:1; min-width:0;">
+                <div style="font-size:0.875rem; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${s.name}</div>
+                <div style="font-size:0.75rem; color:var(--muted);">${s.total_messages} msgs · ${s.forwarded} forwarded · ${s.scam_hits} scam hits</div>
+            </div>
+            <span class="tag tag-${s.risk_score >= 60 ? 'danger' : s.risk_score >= 25 ? 'warn' : 'success'}">${s.risk_score}</span>
+        </div>
+    `).join('');
+}
+
+function renderIOCs(iocs) {
+    const el = document.getElementById('ioc-content');
+    const total = iocs.urls.length + iocs.phones.length + iocs.upi_ids.length;
+    if (!total) {
+        el.innerHTML = '<div style="color:var(--muted); text-align:center; padding:2rem;">No IOCs extracted</div>';
+        return;
+    }
+    el.innerHTML = `
+        ${iocs.urls.length ? `
+        <div style="margin-bottom:1.5rem;">
+            <div style="font-size:0.75rem; font-weight:600; color:var(--muted); margin-bottom:0.5rem; display:flex; align-items:center; gap:0.5rem;">
+                🔗 URLS / LINKS <span class="tag tag-danger">${iocs.urls.length}</span>
+            </div>
+            <div>${iocs.urls.map(u => `<span class="ioc-chip" style="color:#f87171;">${u}</span>`).join('')}</div>
+        </div>` : ''}
+        ${iocs.phones.length ? `
+        <div style="margin-bottom:1.5rem;">
+            <div style="font-size:0.75rem; font-weight:600; color:var(--muted); margin-bottom:0.5rem; display:flex; align-items:center; gap:0.5rem;">
+                📞 PHONE NUMBERS <span class="tag tag-warn">${iocs.phones.length}</span>
+            </div>
+            <div>${iocs.phones.map(p => `<span class="ioc-chip" style="color:#fbbf24;">${p}</span>`).join('')}</div>
+        </div>` : ''}
+        ${iocs.upi_ids.length ? `
+        <div style="margin-bottom:1.5rem;">
+            <div style="font-size:0.75rem; font-weight:600; color:var(--muted); margin-bottom:0.5rem; display:flex; align-items:center; gap:0.5rem;">
+                💳 UPI IDs <span class="tag tag-purple">${iocs.upi_ids.length}</span>
+            </div>
+            <div>${iocs.upi_ids.map(u => `<span class="ioc-chip" style="color:#c084fc;">${u}</span>`).join('')}</div>
+        </div>` : ''}
+    `;
+}
+
+function renderScamMsgs(flagged) {
+    const allMsgs = [];
+    flagged.forEach(s => {
+        s.scam_messages.forEach(m => allMsgs.push({ sender: s.name, ...m }));
+    });
+
+    if (!allMsgs.length) {
+        document.getElementById('scam-msgs-list').innerHTML = '<div style="color:var(--muted); text-align:center; padding:2rem;">No scam messages detected</div>';
+        return;
+    }
+
+    document.getElementById('scam-msgs-list').innerHTML = allMsgs.map(m => `
+        <div class="scam-msg">
+            <div style="display:flex; justify-content:space-between; margin-bottom:0.4rem;">
+                <span style="font-weight:600; font-size:0.8rem; color:var(--warn);">${m.sender}</span>
+                <span style="font-size:0.75rem; color:var(--muted);">${m.date}</span>
+            </div>
+            <div style="font-size:0.8rem; color:var(--text); margin-bottom:0.4rem; line-height:1.5;">${m.text}</div>
+            <div>${m.keywords.map(k => `<span class="kw-badge">${k}</span>`).join('')}</div>
+        </div>
+    `).join('');
+}
+
+function switchTab(tab, btn) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    ['flagged', 'all-senders', 'iocs', 'scam-msgs'].forEach(t => {
+        document.getElementById('tab-' + t).style.display = t === tab ? 'block' : 'none';
+    });
+}
+</script>
+{% endblock %}

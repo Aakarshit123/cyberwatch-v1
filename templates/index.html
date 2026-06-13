@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="main">
+    <!-- Hero -->
+    <div style="padding: 3rem 0 2rem; text-align: center;">
+        <div style="display:inline-flex; align-items:center; gap:0.5rem; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.3); padding:4px 12px; border-radius:20px; font-size:0.75rem; color:#3b82f6; margin-bottom:1.5rem;">
+            🛡️ Amroha Police × Shri Venkateshwara University — Cyber Security Internship 2026
+        </div>
+        <h1 style="font-size:3rem; font-weight:800; letter-spacing:-0.03em; margin-bottom:1rem; line-height:1.1;">
+            Cyber<span style="color:#3b82f6;">Watch</span>
+        </h1>
+        <p style="font-size:1.1rem; color:#64748b; max-width:500px; margin:0 auto 2rem; line-height:1.6;">
+            Forensic intelligence tools for law enforcement — trace UPI fraud networks and analyze WhatsApp scam chains.
+        </p>
+        <div style="display:flex; gap:1rem; justify-content:center; flex-wrap:wrap;">
+            <a href="/upi" class="btn btn-primary" style="font-size:1rem; padding:0.75rem 2rem;">
+                📊 UPI Fraud Analyzer
+            </a>
+            <a href="/whatsapp" class="btn btn-ghost" style="font-size:1rem; padding:0.75rem 2rem;">
+                💬 WhatsApp Tracker
+            </a>
+        </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Tool cards -->
+    <div class="grid grid-2" style="margin-bottom:3rem;">
+
+        <a href="/upi" style="text-decoration:none;">
+            <div class="card" style="cursor:pointer; transition: border-color 0.2s; border-color: transparent;" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='transparent'">
+                <div style="font-size:2.5rem; margin-bottom:1rem;">📊</div>
+                <h2 style="font-size:1.25rem; font-weight:700; margin-bottom:0.5rem;">UPI Fraud Graph Analyzer</h2>
+                <p style="color:#64748b; font-size:0.9rem; line-height:1.6; margin-bottom:1rem;">
+                    Map money flow networks from UPI transaction data. Automatically detect mule accounts, identify masterminds, and visualize fraud clusters.
+                </p>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                    <span class="tag tag-danger">Mule Detection</span>
+                    <span class="tag tag-warn">Network Graph</span>
+                    <span class="tag tag-info">Risk Scoring</span>
+                </div>
+            </div>
+        </a>
+
+        <a href="/whatsapp" style="text-decoration:none;">
+            <div class="card" style="cursor:pointer; transition: border-color 0.2s; border-color: transparent;" onmouseover="this.style.borderColor='#06b6d4'" onmouseout="this.style.borderColor='transparent'">
+                <div style="font-size:2.5rem; margin-bottom:1rem;">💬</div>
+                <h2 style="font-size:1.25rem; font-weight:700; margin-bottom:0.5rem;">WhatsApp Forward Chain Tracker</h2>
+                <p style="color:#64748b; font-size:0.9rem; line-height:1.6; margin-bottom:1rem;">
+                    Upload a WhatsApp chat export to trace how scam messages spread, identify original senders, extract IOCs and flag suspicious patterns.
+                </p>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                    <span class="tag tag-success">IOC Extraction</span>
+                    <span class="tag tag-purple">Scam Keywords</span>
+                    <span class="tag tag-info">Timeline View</span>
+                </div>
+            </div>
+        </a>
+    </div>
+
+    <!-- How it works -->
+    <div class="card">
+        <div class="card-title">How It Works</div>
+        <div class="grid grid-3">
+            <div style="padding:1rem 0;">
+                <div style="font-size:1.5rem; margin-bottom:0.5rem;">📥</div>
+                <div style="font-weight:600; margin-bottom:0.25rem;">1. Input Data</div>
+                <div style="font-size:0.85rem; color:#64748b;">Paste UPI transaction pairs or upload a WhatsApp .txt export from a suspect's device</div>
+            </div>
+            <div style="padding:1rem 0;">
+                <div style="font-size:1.5rem; margin-bottom:0.5rem;">🔍</div>
+                <div style="font-weight:600; margin-bottom:0.25rem;">2. Auto Analysis</div>
+                <div style="font-size:0.85rem; color:#64748b;">Algorithms detect mule patterns, forward chains, scam keywords, and suspicious flow ratios</div>
+            </div>
+            <div style="padding:1rem 0;">
+                <div style="font-size:1.5rem; margin-bottom:0.5rem;">📋</div>
+                <div style="font-weight:600; margin-bottom:0.25rem;">3. Visual Report</div>
+                <div style="font-size:0.85rem; color:#64748b;">Interactive graph + risk-scored suspect list ready for investigation or FIR documentation</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
